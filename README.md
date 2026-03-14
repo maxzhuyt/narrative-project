@@ -1,6 +1,6 @@
 # Evaluating Chilling Endings in Short Fiction
 
-An evaluation pipeline for measuring how much a story's ending reshapes its meaning — what we call **Interpretive Divergence**.
+An evaluation pipeline for measuring **Interpretive Divergence**.
 
 ## What is a chilling ending?
 
@@ -8,7 +8,7 @@ A "chilling ending" occurs when the final sentences of a story force a re-readin
 
 1. **Factual realignment** — the ending introduces a fact that reshapes understanding (e.g., "the wife had an abortion, just in case")
 2. **Stylistic shift** — a word or tone breaks from expectations (e.g., "melancholically" reframing a satirical triumph)
-3. **Meta-narrative reframing** — the ending comments on the act of storytelling itself
+3. **Meta-narrative reframing** — the ending comments on the act of storytelling itself (Currently not implemented)
 
 ## Pipeline overview
 
@@ -33,9 +33,9 @@ Embed each section pair -> cosine distance
 Content distance, Form distance, Global distance
 ```
 
-**Key design choices:**
+**Design choices:**
 - **Two aspect-specific readings** instead of one generic reading. Content readings are sensitive to factual realignment; Form readings are sensitive to stylistic shift. The divergence *pattern* across the two reveals the mechanism type without a separate classifier.
-- **Revision-anchored** (temperature=0). The model revises its own prior reading, preserving language where interpretation doesn't change. This controls noise while surfacing genuine shifts.
+- **Revision-anchored** (temperature=0). The model revises its own prior reading, preserving language where interpretation doesn't change. 
 - **Automatic ending extraction** (Pass 0). The LLM identifies the minimal final passage that does the most interpretive work, typically 1-3 sentences. This standardizes ending length across stories (0.2-1.4% of text) and removes a major confound.
 - **Local embedding model** (Qwen3-Embedding-0.6B, 1024-dim) for cosine distance computation. Runs on GPU.
 
@@ -59,7 +59,7 @@ Content distance, Form distance, Global distance
   - Ladies' Lunch: Form >> Content (tonal/emotional shift, not new facts)
   - Two Ruminations: Content >> Form (meta-narrative registers as argument shift)
 
-### Known limitations
+### Limitations
 
 - **Negative space endings** (Ladies' Lunch) remain hard. The sentence "Farah and Bridget still mean to figure out some way to go up and see Lotte, maybe in the spring" is devastating to human readers who fill in the absence, but the revision prompt can only work with what's on the page — it doesn't introduce new vocabulary that embeddings can detect.
 - **Embedding distance measures lexical novelty of the interpretive shift, not its depth.** Factual realignment introduces new words (abortion, consent, paternity); stylistic shift and negative space don't.
