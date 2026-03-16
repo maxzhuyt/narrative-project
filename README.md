@@ -1,115 +1,119 @@
-# Evaluating Chilling Endings in Short Fiction
+# Narrative Predictability
 
-An evaluation pipeline for measuring **Interpretive Divergence**.
+Measuring how well a language model can predict story endings as more text is revealed. Unpredictability — the model's persistent inability to anticipate the ending — is used as a proxy for narrative surprise.
 
-## What is a chilling ending?
+---
 
-A "chilling ending" occurs when the final sentences of a story force a re-reading of the preceding text. We identified three mechanisms (see `1_8 Update.pdf`):
+## What we tried first (and why it didn't work)
 
-1. **Factual realignment** — the ending introduces a fact that reshapes understanding (e.g., "the wife had an abortion, just in case")
-2. **Stylistic shift** — a word or tone breaks from expectations (e.g., "melancholically" reframing a satirical triumph)
-3. **Meta-narrative reframing** — the ending comments on the act of storytelling itself (Currently not implemented)
+### Close-reading + embedding distance (v1–v4)
 
-## Pipeline overview
+The original approach asked an LLM to do a two-pass "close reading": first interpret the story without the ending, then revise the interpretation after seeing the ending. Cosine distance between the two readings was supposed to capture how much the ending reshapes meaning.
+
+**Why it failed:**
+- The revision prompt preserved language where interpretation didn't change, actively suppressing the signal. A story with a devastating but subtle ending (e.g. *Ladies' Lunch* — "maybe in the spring, when the weather is nicer") got near-zero distance because the words of the revision barely changed.
+- Embedding distance measures *lexical novelty* in the interpretation, not interpretive depth. Factual realignment (*Poor Girl* — "the wife had an abortion, just in case") introduces new vocabulary into the reading; tonal devastation and negative-space endings don't.
+- Endings that operate through **confirmation of the worst possibility** are fundamentally undetectable by a distance-between-readings metric.
+
+### 5-generation prediction (v5 prototype)
+
+The next attempt generated 5 possible endings at 5 coarse truncation points, comparing them to the actual ending via embedding distance and an LLM-as-judge score.
+
+**Why it failed:**
+- 5 generations per point is far too noisy — curves were unreliable.
+- Only 5 truncation points meant a coarse curve that missed within-story dynamics.
+- The LLM-as-judge compressed all scores into a 2–5 out of 10 range, providing almost no discrimination.
+
+---
+
+## Current approach: 100-ending evaluation
+
+At **every sentence boundary**, generate 100 independent possible endings with Qwen3-32B (temperature=1.2, top_p=0.95). Compare each generated ending to the **actual continuation** — the rest of the story from that position — using cosine distance with Qwen3-Embedding-0.6B.
 
 ```
-Full Story
-    |
-    v
-[Pass 0] Auto-extract minimal ending (1-3 sentences)
-    |
-    v
-[Pass 1a] Content reading of truncated story (plot, character, meaning)
-[Pass 1b] Form reading of truncated story (voice, tone, imagery)
-    |
-    v
-[Pass 2a] Revise content reading given full story
-[Pass 2b] Revise form reading given full story
-    |
-    v
-Embed each section pair -> cosine distance
-    |
-    v
-Content distance, Form distance, Global distance
+for each position i = 1..N-1:
+    context = sentences[:i]
+    generate 100 endings (Qwen3-32B, temperature=1.2)
+    continuation = sentences[i:]   ← the actual text that follows
+    mean_cosine_dist = avg cosine_dist(each ending, continuation)
+
+→ plot mean_cosine_dist vs. % tokens revealed
 ```
 
-**Design choices:**
-- **Two aspect-specific readings** instead of one generic reading. Content readings are sensitive to factual realignment; Form readings are sensitive to stylistic shift. The divergence *pattern* across the two reveals the mechanism type without a separate classifier.
-- **Revision-anchored** (temperature=0). The model revises its own prior reading, preserving language where interpretation doesn't change. 
-- **Automatic ending extraction** (Pass 0). The LLM identifies the minimal final passage that does the most interpretive work, typically 1-3 sentences. This standardizes ending length across stories (0.2-1.4% of text) and removes a major confound.
-- **Local embedding model** (Qwen3-Embedding-0.6B, 1024-dim) for cosine distance computation. Runs on GPU.
+**Why this works better:**
+- 100 samples per position gives stable mean estimates.
+- Sentence-level granularity produces a full narrative curve, not 5 points.
+- Comparing against the **continuation** (not just the final sentence) rewards endings that naturally resolve the narrative tension — a more meaningful target than the last sentence alone.
+- No LLM judge: pure embedding distance is deterministic given the generations.
 
-## Results on 6 test stories
+**Reading the curves:** High distance = the model cannot anticipate where the story goes. A curve that stays high late in the story = persistently unpredictable ending. A falling curve = the model "sees it coming" as context grows.
 
-| Story | Expected | End% | Content | Form | Global |
-|-------|----------|------|---------|------|--------|
-| Poor Girl (66) | high | 1.4% | **0.107** | **0.070** | **0.088** |
-| Two Ruminations (135) | moderate | 1.2% | 0.063 | 0.015 | 0.039 |
-| Snowing in Greenwich Village (56) | low | 0.4% | 0.061 | 0.018 | 0.039 |
-| The Fellow (15) | low | 0.2% | 0.051 | 0.027 | 0.039 |
-| Ladies' Lunch (144) | high | 0.8% | 0.018 | **0.043** | 0.031 |
-| Invasion of the Martians (166) | low | 0.7% | 0.010 | 0.028 | 0.019 |
+---
 
-### What works
+## Corpora
 
-- **Poor Girl** scores 2x higher than everything else. The ending ("the wife had an abortion, just in case") is a paradigmatic factual realignment — one sentence that reframes the entire story.
-- **Invasion of the Martians** correctly scores lowest. The ending confirms the satire without recontextualizing anything.
-- **The content/form split reveals mechanism type:**
-  - Poor Girl: Content >> Form (factual realignment)
-  - Ladies' Lunch: Form >> Content (tonal/emotional shift, not new facts)
-  - Two Ruminations: Content >> Form (meta-narrative registers as argument shift)
+| Corpus | Location | N | Description |
+|--------|----------|---|-------------|
+| Literary | `NEWCORPUS_CLEANED/` | 6 | New Yorker short fiction (hand-selected) |
+| Baseline (simple) | `BASELINE_CORPUS/b*.txt` | 35 | 5 Gutenberg fairy tales + 30 StoryStar short fiction |
+| Baseline (WP human) | `BASELINE_CORPUS/ghostbuster-data/wp/human/` | 50 sampled | Human-authored WritingPrompts fiction |
+| Baseline (WP GPT) | `BASELINE_CORPUS/ghostbuster-data/wp/gpt/` | 50 sampled | GPT-generated WritingPrompts fiction |
 
-### Limitations
+The Gutenberg stories (b0001–b0005) turned out to be near-memorised by Qwen3 (mean cosine dist ≈ 0.14 vs ≈ 0.20 for StoryStar) and are **not** a reliable unpredictability baseline — the model is essentially recalling the ending rather than predicting it.
 
-- **Negative space endings** (Ladies' Lunch) remain hard. The sentence "Farah and Bridget still mean to figure out some way to go up and see Lotte, maybe in the spring" is devastating to human readers who fill in the absence, but the revision prompt can only work with what's on the page — it doesn't introduce new vocabulary that embeddings can detect.
-- **Embedding distance measures lexical novelty of the interpretive shift, not its depth.** Factual realignment introduces new words (abortion, consent, paternity); stylistic shift and negative space don't.
-- Scores in the middle range (0.03-0.04) are noisy and hard to separate.
+---
 
-### Ending extraction examples
+## Scripts
 
-| Story | Auto-extracted ending | Explanation |
-|-------|----------------------|-------------|
-| Poor Girl | "No one knows exactly what happened to them — only that, six weeks later, the wife had an abortion, just in case, and a year later she gave birth to a baby girl." | Reframes the story from broken marriage to cyclical entrapment; "just in case" implies lingering suspicion |
-| Ladies' Lunch | "Farah and Bridget still mean to figure out some way to go up and see Lotte, maybe in the spring, when the weather is nicer." | Friends' rescue plans devolve into vague intentions, confirming Lotte's abandonment |
-| Two Ruminations | "And expressions of discontent — you think in the car... never solve the riddle of the world, or bring the banality of sequential reality to a location of deeper grace." | Reframes narrative as attempt to transform suffering into art |
-| Martians | "The Senator moved the switch to the seventh position, as a kind of triumphant salute, and melancholically left the stage to a standing ovation." | "Melancholically" recontextualizes public triumph as hollow victory |
+### Generation
 
-## Data
+**`run_endings_scaled.py` / `run_endings_scaled.sbatch`**
+Generates 100 endings per sentence position for the 6 literary stories in `NEWCORPUS_CLEANED/`. Results saved to `results_scaled/{sid}_endings.json`.
 
-`NEWCORPUS_CLEANED/` contains ~5000 short stories (numbered .txt files).
+**`run_baseline_eval.py` / `run_baseline_eval.sbatch`**
+Same pipeline for the 35 baseline stories in `BASELINE_CORPUS/b*.txt`. Results saved to `BASELINE_CORPUS/results/{sid}_endings.json`.
 
-## Usage
+**`run_wp_eval.py` / `run_wp_eval.sbatch`**
+Same pipeline for 50 sampled human + 50 sampled GPT stories from the WritingPrompts (WP) subset of the Ghostbuster dataset. Stories ≤3000 words; positions with <10-word sentences are skipped (deferred to next position). Results saved to `BASELINE_CORPUS/results/wph{001-050}_endings.json` and `wpg{001-050}_endings.json`.
 
+All generation scripts use Qwen3-32B via vLLM on H200 (`--constraint=H200`).
+
+### Embedding distances
+
+**`compute_distances.py` / `compute_distances.sbatch`**
+Loads all `_endings.json` result files (literary + all baselines), encodes each generated ending and the actual continuation with Qwen3-Embedding-0.6B, computes mean cosine distance per position, and saves everything to `distances/all_distances.json`. Resume-safe: skips already-processed stories.
+
+Run after any new generation job completes:
 ```bash
-# Single story with auto-extracted ending
-python close_reading_two_passes.py --filename 00066.txt
-
-# Single story with manual ending
-python close_reading_two_passes.py --filename 00066.txt \
-  --ending_text "No one knows exactly what happened to them..."
-
-# Batch run on 6 test stories
-python run_batch.py
+sbatch compute_distances.sbatch
 ```
 
-Requires:
-- Python 3.10+
-- `sentence-transformers`, `scipy`, `requests`, `python-dotenv`
-- OpenRouter API key (as `NARRATIVE` in `.env`)
-- Local embedding model at `/home/maxzhuyt/models/Qwen3-Embedding-0.6B`
+### Analysis
 
-## Pipeline evolution
+**`analysis_predictability.ipynb`**
+Loads `distances/all_distances.json` — no GPU required. Produces:
+- Per-story narrative curves (% tokens revealed vs. mean cosine distance)
+- Peak annotations (top 3 local maxima per story, labelled via DeepSeek API)
+- Descriptive statistics comparing literary stories to baseline distribution (z-scores, percentile ranks)
 
-We iterated through several versions:
+---
 
-| Version | Approach | Poor Girl | Ladies' Lunch | Martians |
-|---------|----------|-----------|---------------|----------|
-| v1 | Single 9-section reading + revision | 0.059 | 0.024 | 0.014 |
-| v2 | Single reading, independent (no revision) | 0.049-0.073 | 0.035-0.048 | 0.026-0.031 |
-| v3 | Two-aspect + revision + manual endings | 0.082 | 0.063 | 0.030 |
-| **v4** | **Two-aspect + revision + auto endings** | **0.088** | **0.031** | **0.019** |
+## Directory structure
 
-Key lessons:
-- Independent readings uncap signal but also uncap noise. Revision at temperature=0 is the better tradeoff.
-- Splitting into Content and Form aspects surfaces mechanism type from the divergence pattern itself.
-- Normalizing by ending length distorts results (1/x is too steep). Standardizing the *input* via auto-extraction is better than post-hoc correction.
+```
+narrative_project/
+├── analysis_predictability.ipynb   # main analysis notebook (CPU only)
+├── compute_distances.py/.sbatch    # embedding distance computation (GPU)
+├── run_endings_scaled.py/.sbatch   # literary story generation (GPU)
+├── run_baseline_eval.py/.sbatch    # baseline story generation (GPU)
+├── run_wp_eval.py/.sbatch          # WritingPrompts generation (GPU)
+├── NEWCORPUS_CLEANED/              # ~925 New Yorker stories (.txt)
+├── BASELINE_CORPUS/
+│   ├── b0001–b0035.txt             # 35 simple baseline stories
+│   ├── ghostbuster-data/wp/        # WritingPrompts subset
+│   └── results/                    # _endings.json per story
+├── results_scaled/                 # _endings.json for 6 literary stories
+├── distances/                      # all_distances.json (pre-computed)
+├── figures/                        # output PNGs
+└── archive/                        # superseded scripts
+```

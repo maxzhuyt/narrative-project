@@ -2,5 +2,20 @@
 __pycache__/
 *.pyc
 .env
+
+# Generated results (large JSON files)
 results/
+results_scaled/
+results_scaled_*/
+results_thinking/
+distances/
+logs/
+BASELINE_CORPUS/results/
+BASELINE_CORPUS/results_sglang/
+
+# Large external datasets
+BASELINE_CORPUS/ghostbuster-data/
+NEWCORPUS_CLEANED/
+
+# Scratch / legacy
 endings_fix.json
