@@ -10,21 +10,6 @@ Measuring how well a language model can predict story endings as more text is re
 
 The original approach asked an LLM to do a two-pass "close reading": first interpret the story without the ending, then revise the interpretation after seeing the ending. Cosine distance between the two readings was supposed to capture how much the ending reshapes meaning.
 
-**Why it failed:**
-- The revision prompt preserved language where interpretation didn't change, actively suppressing the signal. A story with a devastating but subtle ending (e.g. *Ladies' Lunch* — "maybe in the spring, when the weather is nicer") got near-zero distance because the words of the revision barely changed.
-- Embedding distance measures *lexical novelty* in the interpretation, not interpretive depth. Factual realignment (*Poor Girl* — "the wife had an abortion, just in case") introduces new vocabulary into the reading; tonal devastation and negative-space endings don't.
-- Endings that operate through **confirmation of the worst possibility** are fundamentally undetectable by a distance-between-readings metric.
-
-### 5-generation prediction (v5 prototype)
-
-The next attempt generated 5 possible endings at 5 coarse truncation points, comparing them to the actual ending via embedding distance and an LLM-as-judge score.
-
-**Why it failed:**
-- 5 generations per point is far too noisy — curves were unreliable.
-- Only 5 truncation points meant a coarse curve that missed within-story dynamics.
-- The LLM-as-judge compressed all scores into a 2–5 out of 10 range, providing almost no discrimination.
-
----
 
 ## Current approach: 100-ending evaluation
 
