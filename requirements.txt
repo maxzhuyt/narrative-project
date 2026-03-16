@@ -1,0 +1,19 @@
+# ── GPU inference (generation + embedding computation) ────────────────────────
+# Tested in vllm_env on Midway3 H200 (CUDA 12.9, PyTorch 2.9)
+vllm>=0.11.2
+torch>=2.9.0
+transformers>=4.57.0
+sentence-transformers>=5.3.0
+
+# ── Notebook / analysis (CPU, no GPU required) ────────────────────────────────
+# Tested in honest_llama_env; matplotlib not available in vllm_env
+matplotlib>=3.10.0
+numpy>=2.2.0
+
+# ── External API calls ────────────────────────────────────────────────────────
+# DeepSeek API (peak annotations in analysis_predictability.ipynb)
+openai>=2.26.0
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+requests>=2.32.0
+python-dotenv>=1.2.0

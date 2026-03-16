@@ -37,6 +37,7 @@ MAX_TOKENS = 100
 
 MAX_STORY_ID = 200
 MAX_WORD_COUNT = 5000
+MIN_SENT_WORDS = 10   # skip position i if sentences[i-1] has fewer words
 
 
 def discover_stories(data_dir, max_id=MAX_STORY_ID, max_words=MAX_WORD_COUNT):
@@ -103,6 +104,16 @@ def get_actual_ending(sentences):
     return [sentences[-1]]
 
 
+def active_positions(sentences, last_context_idx):
+    """Positions to evaluate: skip i if sentences[i-1] has < MIN_SENT_WORDS words.
+    The final context position is always included."""
+    positions = []
+    for i in range(1, last_context_idx + 1):
+        if len(sentences[i - 1].split()) >= MIN_SENT_WORDS or i == last_context_idx:
+            positions.append(i)
+    return positions
+
+
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
@@ -151,9 +162,6 @@ def main():
     # ── Process each story ────────────────────────────────────────────────
     for story_id, story_path in stories.items():
         output_path = os.path.join(RESULTS_DIR, f"{story_id}_endings.json")
-        if os.path.exists(output_path):
-            print(f"\n[{story_id}] — already done, skipping")
-            continue
 
         # Load and split story
         with open(story_path, "r", encoding="utf-8") as f:
@@ -168,17 +176,19 @@ def main():
         actual_ending = " ".join(ending_sents)
         last_context_idx = n_sents - n_ending  # last position before ending
 
+        positions = active_positions(sentences, last_context_idx)
+        skipped = last_context_idx - len(positions)
+
         print(f"\n{'='*70}")
         print(f"[{story_id}]")
         print(f"  {n_sents} sentences, {len(full_text)} chars")
         print(f"  Actual ending ({n_ending} sents): {actual_ending[:120]}...")
-        print(f"  Generating for positions 1..{last_context_idx} "
-              f"× {N_ENDINGS} = {last_context_idx * N_ENDINGS} endings")
+        print(f"  Evaluating {len(positions)}/{last_context_idx} positions "
+              f"({skipped} skipped, short sentences) × {N_ENDINGS} endings")
 
         # Prepare all prompts — apply chat template with thinking disabled
         prompts = []
-        positions = []
-        for i in range(1, last_context_idx + 1):
+        for i in positions:
             context = " ".join(sentences[:i])
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -192,7 +202,6 @@ def main():
                 enable_thinking=False,
             )
             prompts.append(prompt)
-            positions.append(i)
 
         # Generate in batches
         t0 = time.time()
@@ -226,6 +235,8 @@ def main():
             "story_id": story_id,
             "n_sentences": n_sents,
             "n_ending_sentences": n_ending,
+            "n_positions_evaluated": len(positions),
+            "n_positions_skipped": skipped,
             "actual_ending": actual_ending,
             "n_endings_per_position": N_ENDINGS,
             "temperature": TEMPERATURE,
